@@ -38,7 +38,13 @@ def transcribe_loop(sid, clients, LOCK, socketio):
                     return
                 state = clients[sid]
                 stop_flag = state.get("stopped", False)
+                paused_flag = state.get("paused", False)  # Get pause state
                 raw_buffer = bytes(state.get("raw_buffer", b""))
+
+            # If paused, sleep and continue without processing
+            if paused_flag:
+                time.sleep(0.1)
+                continue
 
             # if buffer empty and not stopped, sleep and continue
             if not raw_buffer and not stop_flag:
