@@ -4,6 +4,7 @@ export {};
 declare global {
   interface Window {
     electronAPI?: {
+      resizeWindow: (width: number, height: number) => void;
       setWindowVisibility: (visible: boolean) => void;
       getWindowState: () => Promise<any>;
       onVisibilityChange: (callback: (isVisible: boolean) => void) => void;

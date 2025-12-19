@@ -361,6 +361,8 @@ export default function InputText({
               : screenContext + "\nWhat do you see on my screen? Please describe it and suggest actions based on what you see.";
             
             send(combinedInput);
+            setInput("");
+            committedRef.current = "";
           }
           return;
         } else {

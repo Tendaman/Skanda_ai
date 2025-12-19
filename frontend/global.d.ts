@@ -1,3 +1,4 @@
+//frontend\global.d.ts
 declare module "*.css"
 declare module "ai/rsc"
 declare module "ai"

@@ -2,15 +2,6 @@
 "use client"
 import { useEffect, useRef } from 'react';
 
-// Define the type for the window API we exposed in preload.js
-declare global {
-  interface Window {
-    electronAPI?: {
-      resizeWindow: (width: number, height: number) => void;
-    };
-  }
-}
-
 const FIXED_WIDTH = 600;
 
 export const useElectronWindowResize = () => {
