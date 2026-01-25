@@ -386,11 +386,21 @@ app.whenReady().then(() => {
 
 
 function ensureSocketConnected() {
-  if (socket && socket.connected) return socket;
+  if (socket && socket.connected) {
+    console.log(`Socket already connected: ${socket.id}`);
+    return socket;
+  }
+
+  console.log("Creating new socket connection...");
+
+  if (socket) {
+    socket.disconnect();
+  }
   
   socket = ioClient.connect("http://127.0.0.1:8000", {
     transports: ["websocket"],
     reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
   });
 
   socket.on("connect", () => {
@@ -400,9 +410,6 @@ function ensureSocketConnected() {
   socket.on("transcript", (data) => {
     if (win && win.webContents) {
       win.webContents.send("mic-text", data.partial || "");
-      if (data.final) {
-        win.webContents.send("mic-final", data.final);
-      }
     }
   });
 
@@ -418,159 +425,151 @@ function ensureSocketConnected() {
 }
 
 function startAudioCapture(mode) {
-  if (ffmpegProcess) {
-    console.log("Stopping existing audio capture...");
-    try {
-      ffmpegProcess.kill("SIGINT");
-    } catch (err) {
-      console.error("Error stopping existing process:", err);
-    }
-    ffmpegProcess = null;
-  }
-  
-  ensureSocketConnected();
-  
-  const micName = "Microphone (Realtek(R) Audio)";
-  const speakersName = "Stereo Mix (Realtek(R) Audio)";
-  
-  let ffmpegArgs;
-  
-  switch(mode) {
-    case "system":
-      // Capture audio playing through speakers
-      console.info("Starting SYSTEM AUDIO capture from Speakers...");
-      ffmpegArgs = [
-        "-f", "dshow",
-        "-i", `audio=${speakersName}`,
-        "-ar", "16000",
-        "-ac", "1",
-        "-f", "s16le",
-        "-"
-      ];
-      break;
-      
-    case "voice":
-      // Capture from microphone
-      console.info("Starting VOICE capture from Microphone...");
-      ffmpegArgs = [
-        "-f", "dshow",
-        "-i", `audio=${micName}`,
-        "-ar", "16000",
-        "-ac", "1",
-        "-f", "s16le",
-        "-"
-      ];
-      break;
-      
-    case "both":
-      // Capture both simultaneously (mix them)
-      console.info("Starting BOTH microphone and system audio...");
-      ffmpegArgs = [
-        "-f", "dshow",
-        "-i", `audio=${micName}`,      // Microphone input
-        "-f", "dshow",
-        "-i", `audio=${speakersName}`, // Speakers (system audio) input
-        "-filter_complex", "amix=inputs=2:duration=longest", // Mix both inputs
-        "-ar", "16000",
-        "-ac", "1",
-        "-f", "s16le",
-        "-"
-      ];
-      break;
-      
-    default:
-      console.error("Unknown mode:", mode);
-      return false;
-  }
-  
-  try {
-    ffmpegProcess = spawn("ffmpeg", ffmpegArgs, { windowsHide: true });
+  return new Promise((resolve) => {
+    console.log(`[1] Starting audio capture for mode: ${mode}`);
     
-    ffmpegProcess.stdout.on("data", (chunk) => {
-      if (socket && socket.connected) {
-        socket.emit("audio_chunk", chunk);
-      }
-    });
-    
-    ffmpegProcess.stderr.on("data", () => {
-      // Optional: uncomment for debugging
-      // console.debug("ffmpeg stderr:", d.toString());
-    });
-    
-    ffmpegProcess.on("error", (err) => {
-      console.error("ffmpeg error:", err);
-      ffmpegProcess = null;
-    });
-    
-    ffmpegProcess.on("close", (code) => {
-      console.info(`ffmpeg closed with code ${code}`);
-      ffmpegProcess = null;
-      
-      // Only emit stop_stream if we're NOT clearing the buffer
-      if (socket && socket.connected && !isClearingBuffer) {
-        socket.emit("stop_stream");
-      }
-    });
-    
-    // Inform backend to start streaming session
-    if (socket && socket.connected) {
-      socket.emit("start_stream", { 
-        sample_rate: 16000, 
-        channels: 1, 
-        sample_width: 2,
-        mode: mode 
-      });
-    }
-    
-    return true;
-    
-  } catch (err) {
-    console.error(`Failed to start ${mode} capture:`, err);
-    
-    // Try alternative approaches if direct capture fails
-    if (mode === "system") {
-      console.info("Trying alternative system audio capture methods...");
-      
-      // Method 1: Try with "Stereo Mix"
+    if (ffmpegProcess) {
+      console.log("Stopping existing audio capture...");
       try {
-        ffmpegProcess = spawn("ffmpeg", [
-          "-f", "dshow",
-          "-i", "audio=Stereo Mix",
-          "-ar", "16000",
-          "-ac", "1",
-          "-f", "s16le",
-          "-"
-        ], { windowsHide: true });
-        
-        setupFFmpegProcess();
-        return true;
-      } catch (err1) {
-        console.error("Stereo Mix also failed:", err1);
+        ffmpegProcess.kill("SIGINT");
+      } catch (err) {
+        console.error("Error stopping existing process:", err);
       }
-      
-      // Method 2: You might need to enable Stereo Mix in Windows
-      console.error(`
-      ==============================================
-      SYSTEM AUDIO CAPTURE FAILED
-      
-      To capture system audio on Windows, you need to:
-      1. Right-click the speaker icon in system tray
-      2. Select "Sounds"
-      3. Go to "Recording" tab
-      4. Right-click and enable "Show Disabled Devices"
-      5. Enable "Stereo Mix" or "What U Hear"
-      6. Set it as default recording device
-      
-      OR install a virtual audio cable:
-      - VB-Cable: https://vb-audio.com/Cable/
-      - Or use the loopback-capture-sample you mentioned
-      ==============================================
-      `);
+      ffmpegProcess = null;
     }
     
-    return false;
-  }
+    console.log(`[2] Ensuring socket connection...`);
+    
+    // First, ensure we have a socket connection
+    ensureSocketConnected();
+    
+    // Wait for socket to be connected
+    const checkConnection = () => {
+      if (socket && socket.connected) {
+        console.log(`[3.2] Socket connected: ${socket.id}, proceeding with capture...`);
+        proceedWithCapture();
+      } else {
+        console.log(`[3.1] Waiting for socket connection...`);
+        setTimeout(checkConnection, 100);
+      }
+    };
+    
+    // Start checking for connection
+    checkConnection();
+    
+    function proceedWithCapture() {
+      const micName = "Microphone (Realtek(R) Audio)";
+      const speakersName = "Stereo Mix (Realtek(R) Audio)";
+      
+      let ffmpegArgs;
+      
+      switch(mode) {
+        case "system":
+          console.info("[4] Starting SYSTEM AUDIO capture from Speakers...");
+          ffmpegArgs = [
+            "-f", "dshow",
+            "-i", `audio=${speakersName}`,
+            "-ar", "16000",
+            "-ac", "1",
+            "-f", "s16le",
+            "-"
+          ];
+          break;
+          
+        case "voice":
+          console.info("[4] Starting VOICE capture from Microphone...");
+          ffmpegArgs = [
+            "-f", "dshow",
+            "-i", `audio=${micName}`,
+            "-ar", "16000",
+            "-ac", "1",
+            "-f", "s16le",
+            "-"
+          ];
+          break;
+          
+        case "both":
+          console.info("[4] Starting BOTH microphone and system audio...");
+          ffmpegArgs = [
+            "-f", "dshow",
+            "-i", `audio=${micName}`,
+            "-f", "dshow",
+            "-i", `audio=${speakersName}`,
+            "-filter_complex", "amix=inputs=2:duration=longest",
+            "-ar", "16000",
+            "-ac", "1",
+            "-f", "s16le",
+            "-"
+          ];
+          break;
+          
+        default:
+          console.error("Unknown mode:", mode);
+          resolve(false);
+          return;
+      }
+      
+      try {
+        console.log(`[5] Starting ffmpeg...`);
+        ffmpegProcess = spawn("ffmpeg", ffmpegArgs, { windowsHide: true });
+        
+        console.log(`[6] FFmpeg started with PID: ${ffmpegProcess.pid}`);
+        
+        // Use your existing setupFFmpegProcess function
+        setupFFmpegProcess();
+        
+        console.log(`[7] Emitting start_stream to backend`);
+        socket.emit("start_stream", { 
+          sample_rate: 16000, 
+          channels: 1, 
+          sample_width: 2,
+          mode: mode 
+        });
+        
+        console.log(`[8] Audio capture started successfully!`);
+        resolve(true);
+        
+      } catch (err) {
+        console.error(`Failed to start ${mode} capture:`, err);
+        
+        // Try alternative approaches if direct capture fails
+        if (mode === "system") {
+          console.info("[9] Trying alternative system audio capture methods...");
+          
+          // Method 1: Try with "Stereo Mix"
+          try {
+            ffmpegProcess = spawn("ffmpeg", [
+              "-f", "dshow",
+              "-i", "audio=Stereo Mix",
+              "-ar", "16000",
+              "-ac", "1",
+              "-f", "s16le",
+              "-"
+            ], { windowsHide: true });
+            
+            setupFFmpegProcess();
+            
+            socket.emit("start_stream", { 
+              sample_rate: 16000, 
+              channels: 1, 
+              sample_width: 2,
+              mode: mode 
+            });
+            
+            console.log(`[10] Alternative capture started successfully!`);
+            resolve(true);
+            return;
+          } catch (err1) {
+            console.error("Stereo Mix also failed:", err1);
+          }
+        }
+        
+        resolve(false);
+      }
+    }
+  });
 }
+
 
 function setupFFmpegProcess() {
   if (!ffmpegProcess) return;
@@ -585,10 +584,6 @@ function setupFFmpegProcess() {
     console.info("ffmpeg closed", code);
     ffmpegProcess = null;
     
-    // Only emit stop_stream if we're NOT clearing the buffer
-    if (socket && socket.connected && !isClearingBuffer) {
-      socket.emit("stop_stream");
-    }
   });
 }
 

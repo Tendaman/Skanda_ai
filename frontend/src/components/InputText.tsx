@@ -63,7 +63,6 @@ export default function InputText({
   const [error, setError] = useState<string | null>(null);
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
   const [isAnalyzingScreen, setIsAnalyzingScreen] = useState(false);
-  const [pendingVoiceMessage, setPendingVoiceMessage] = useState<string>("");
  
   const committedRef = useRef<string>("");
   // Setup electron audio listener
@@ -81,16 +80,9 @@ export default function InputText({
       if (typeof text !== "string") return;
       setInput(text);
       committedRef.current = text;
-      setPendingVoiceMessage(text);
     });
 
-    // Listen for final transcription
-    audioAPI.onFinal((text: string) => {
-      if (typeof text !== "string") return;
-      setInput((prev) => (prev ? prev + " " + text : text));
-      committedRef.current = (committedRef.current ? committedRef.current + " " : "") + text;
-      setPendingVoiceMessage(committedRef.current);
-    });
+    
 
     // Listen for errors
     audioAPI.onError((message: string) => {
@@ -108,56 +100,29 @@ export default function InputText({
   }, [setInput]);
 
   
+  // Change the useEffect to ONLY trigger on isRecording change
   useEffect(() => {
-    if (!isRecording && pendingVoiceMessage.trim() && mode !== "keyboard") {
-      console.log("Processing pending voice message:", pendingVoiceMessage);
+    // Only send when recording stops AND we have input
+    if (!isRecording && input.trim() && mode !== "keyboard") {
+      let currentInput = input.trim();
+      
       if (screenReaderEnabled) {
-        handleSendWithScreenAnalysis(pendingVoiceMessage);
+        handleSendWithScreenAnalysis(currentInput);
       } else {
-        send(pendingVoiceMessage);
+        send(currentInput);
       }
-      setTimeout(() => {
-        setPendingVoiceMessage("");
-        setInput("");
-        committedRef.current = "";
-      }, 100);
+      
+      setInput("");
+      committedRef.current = "";
+      currentInput = "";
     }
-  }, [isRecording, pendingVoiceMessage, screenReaderEnabled, mode, send]);
+  }, [isRecording]);
 
 
   useEffect(() => {
-    (window as any).__TOGGLE_VOICE_RECORDING__ = () => {
-      if (mode !== "voice") {
-        handleModeChange("voice");
-        setTimeout(() => {
-          toggleRecording();
-        }, 100);
-      } else {
-        toggleRecording();
-      }
-    };
-
-    (window as any).__TOGGLE_SYSTEM_RECORDING__ = () => {
-      if (mode !== "system") {
-        handleModeChange("system");
-        setTimeout(() => {
-          toggleRecording();
-        }, 100);
-      } else {
-        toggleRecording();
-      }
-    };
-
-    (window as any).__TOGGLE_BOTH_RECORDING__ = () => {
-      if (mode !== "both") {
-        handleModeChange("both");
-        setTimeout(() => {
-          toggleRecording();
-        }, 100);
-      } else {
-        toggleRecording();
-      }
-    };
+    (window as any).__TOGGLE_SYSTEM_RECORDING__ = () => handleRecordingShortcut("system");
+    (window as any).__TOGGLE_VOICE_RECORDING__ = () => handleRecordingShortcut("voice");
+    (window as any).__TOGGLE_BOTH_RECORDING__ = () => handleRecordingShortcut("both");
 
     (window as any).__TOGGLE_KEYBOARD__ = () => {
       if (mode !== "keyboard") {
@@ -170,10 +135,6 @@ export default function InputText({
           }
         }
         handleModeChange("keyboard");
-      } else {
-        toast.info("Already in Keyboard mode", {
-          duration: 1500,
-        });
       }
     };
 
@@ -214,13 +175,22 @@ export default function InputText({
       setIsRecording(true);
       setIsPaused(false);
       setError(null);
-      setPendingVoiceMessage("");
       committedRef.current = "";
     } else {
       // Stop recording
       audioAPI.stop();
       setIsRecording(false);
       setIsPaused(false);
+    }
+  };
+
+  const handleRecordingShortcut = (shortcutMode: "voice" | "system" | "both") => {
+    if (mode !== shortcutMode) {
+      // Switch mode only, don't start recording
+      handleModeChange(shortcutMode);
+    } else {
+      // Already in this mode - toggle recording
+      toggleRecording();
     }
   };
 
@@ -237,7 +207,6 @@ export default function InputText({
     
     setMode(newMode);
     setError(null);
-    setPendingVoiceMessage("");
     committedRef.current = "";
   };
 
@@ -250,7 +219,6 @@ export default function InputText({
   const handleDeleteAudio = () => {
   // Clear the input and pending voice message
     setInput("");
-    setPendingVoiceMessage("");
     committedRef.current = "";
   };
 

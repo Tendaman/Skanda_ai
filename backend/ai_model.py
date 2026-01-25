@@ -41,7 +41,10 @@ def generate_chat_response(payload: Dict[str, Any]) -> Generator[str, None, None
     """Generate a streaming response from the AI model."""
     model = payload.get("model", DEFAULT_MODEL)
     messages, prior_reasoning = _normalize_messages(payload)
-    extra_body = {"reasoning": {"enabled": True}}
+    extra_body = {
+        "reasoning": {"enabled": True},
+        "transforms": ["middle-out"]
+    }
     if prior_reasoning:
         extra_body["reasoning"]["previous"] = prior_reasoning
 

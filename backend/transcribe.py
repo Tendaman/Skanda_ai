@@ -86,7 +86,6 @@ def transcribe_loop(sid, clients, LOCK, socketio):
                 with LOCK:
                     if sid in clients:
                         clients[sid]["raw_buffer"] = bytearray()
-                socketio.emit("transcript", {"final": prev_text}, room=sid)
                 break
 
             # throttle transcription frequency

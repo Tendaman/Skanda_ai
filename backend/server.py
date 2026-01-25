@@ -25,16 +25,18 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 clients: Dict[str, Dict] = {}
 LOCK = threading.Lock()
 
+
 @app.route("/chat", methods=["POST"])
 def chat():
     """Handle chat requests and stream AI responses."""
     payload = request.get_json(force=True) or {}
-    
+
     # Return the generator as a streaming response with the correct MIME type
     return Response(
-        stream_with_context(generate_chat_response(payload)), 
+        stream_with_context(generate_chat_response(payload)),
         mimetype='text/event-stream'
     )
+
 
 @socketio.on("connect")
 def on_connect():
@@ -50,6 +52,7 @@ def on_connect():
             "thread": None
         }
 
+
 @socketio.on("start_stream")
 def on_start_stream(data):
     """Start audio streaming transcription for a client."""
@@ -58,12 +61,16 @@ def on_start_stream(data):
     with LOCK:
         clients[sid]["raw_buffer"] = b""
         clients[sid]["stopped"] = False
+        clients[sid]["paused"] = False
     # spawn transcription background thread
-    t = threading.Thread(target=transcribe_loop, args=(sid, clients, LOCK, socketio), daemon=True)
-    with LOCK:
-        clients[sid]["thread"] = t
-    t.start()
-    
+    if clients[sid].get("thread") is None or not clients[sid]["thread"].is_alive():
+        t = threading.Thread(target=transcribe_loop, args=(
+            sid, clients, LOCK, socketio), daemon=True)
+        with LOCK:
+            clients[sid]["thread"] = t
+        t.start()
+
+
 @socketio.on("pause_stream")
 def on_pause_stream():
     """Pause audio streaming for a client."""
@@ -73,6 +80,7 @@ def on_pause_stream():
         if sid in clients:
             clients[sid]["paused"] = True
 
+
 @socketio.on("resume_stream")
 def on_resume_stream():
     """Resume audio streaming for a client."""
@@ -81,6 +89,7 @@ def on_resume_stream():
     with LOCK:
         if sid in clients:
             clients[sid]["paused"] = False
+
 
 @socketio.on("clear_stream")
 def on_clear_stream():
@@ -92,6 +101,7 @@ def on_clear_stream():
             clients[sid]["raw_buffer"] = bytearray()
             # Also clear any pending transcription state by resetting pause
             clients[sid]["paused"] = False
+
 
 @socketio.on("audio_chunk")
 def on_audio_chunk(data):
@@ -107,6 +117,7 @@ def on_audio_chunk(data):
             return
         clients[sid]["raw_buffer"] += bytes(data)
 
+
 @socketio.on("stop_stream")
 def on_stop_stream():
     """Stop audio streaming for a client."""
@@ -115,6 +126,7 @@ def on_stop_stream():
     with LOCK:
         if sid in clients:
             clients[sid]["stopped"] = True
+
 
 @socketio.on("disconnect")
 def on_disconnect():
@@ -126,6 +138,7 @@ def on_disconnect():
             # mark stopped so transcription thread will finalize and exit
             clients[sid]["stopped"] = True
             # schedule cleanup
+
             def cleanup():
                 time.sleep(1.5)
                 with LOCK:
@@ -135,7 +148,8 @@ def on_disconnect():
                         except Exception:
                             pass
             threading.Thread(target=cleanup, daemon=True).start()
-            
+
+
 @app.route("/screen/analyze", methods=["POST"])
 def analyze_screen():
     """
@@ -154,10 +168,12 @@ def analyze_screen():
         logging.exception("Screen analysis failed:")
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint."""
     return jsonify({"status": "ok"}), 200
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("BACKEND_PORT", 8000))

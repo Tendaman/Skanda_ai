@@ -22,7 +22,6 @@ declare global {
       resume?: () => void;
       delete?: () => void;
       onText: (callback: (text: string) => void) => void;
-      onFinal: (callback: (text: string) => void) => void;
       onError: (callback: (message: string) => void) => void; 
     };
     screenAPI?: {

@@ -56,9 +56,6 @@ contextBridge.exposeInMainWorld('audioAPI', {
   onText: (callback) => {
     ipcRenderer.on('mic-text', (event, text) => callback(text));
   },
-  onFinal: (callback) => {
-    ipcRenderer.on('mic-final', (event, text) => callback(text));
-  },
   onError: (callback) => {
     ipcRenderer.on('audio-error', (event, message) => callback(message));
   }

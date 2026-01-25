@@ -53,10 +53,6 @@ export default function AudioControls({
       
       electronAPI.onCommandExecuted(handleCommand);
       
-      // Clean up
-      return () => {
-        electronAPI.onCommandExecuted?.(() => {}); // Remove listener
-      };
     }
   }, [isRecording, mode, isPaused, onPausePlayToggle, onDelete]); // FIXED: Add dependencies
 

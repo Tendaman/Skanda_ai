@@ -66,10 +66,11 @@ export default function Home() {
       ? rawInput.split("USER QUERY:")[1]?.trim() || rawInput 
       : rawInput);
 
+    const isFreshStart = messages.length === 0;
+
     pushMessage({ role: "user", text: displayText, rawInput: userText !== rawInput ? rawInput : undefined  });
     setInput("");
     setLoading(true);
-    setScreenContext(null);
 
     // Start empty AI message
     pushMessage({ role: "ai", text: "" });
@@ -85,8 +86,20 @@ export default function Home() {
           'Accept': 'text/event-stream'
         },
         body: JSON.stringify({
-          message: rawInput,
-          hasScreenContext: userText !== rawInput
+          messages: [
+            ...(screenContext ? [{
+              role: 'system',
+              content: `SCREEN CONTEXT:\n${screenContext}\n\nRefer to this screen information when answering questions.`
+            }] : []),
+            ...(isFreshStart ? [] : messages.map(m => ({
+              role: m.role === 'user' ? 'user' : 'assistant',
+              content: m.text
+            }))),
+            {
+              role: 'user',
+              content: rawInput
+            }
+          ],
         }),
         signal: controller.signal,
         
@@ -154,7 +167,7 @@ export default function Home() {
       }
       setAbortController(null);
     }
-  }, [input, pushMessage, updateLastAiMessage]);
+  }, [input, pushMessage, updateLastAiMessage, messages, screenContext]);
 
   // ✅ Cancel ongoing stream
   const cancelStream = useCallback(() => {
