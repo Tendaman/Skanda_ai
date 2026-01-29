@@ -25,7 +25,6 @@ except Exception as e:
     raise RuntimeError(f"Failed to load system_prompt.txt: {e}")
 
 def _normalize_messages(payload: Dict[str, Any]) -> tuple[List[Dict[str, Any]], Any]:
-    """Normalize message payload and extract prior reasoning."""
     msgs = payload.get("messages") or [{"role": "user", "content": payload.get("message", "")}]
     out = [{"role": "system", "content": SYSTEM_PROMPT}]
     last_assistant_reasoning = None
@@ -38,7 +37,6 @@ def _normalize_messages(payload: Dict[str, Any]) -> tuple[List[Dict[str, Any]], 
     return out, last_assistant_reasoning
 
 def generate_chat_response(payload: Dict[str, Any]) -> Generator[str, None, None]:
-    """Generate a streaming response from the AI model."""
     model = payload.get("model", DEFAULT_MODEL)
     messages, prior_reasoning = _normalize_messages(payload)
     extra_body = {

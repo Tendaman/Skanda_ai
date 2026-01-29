@@ -73,7 +73,6 @@ export default function MarkdownRenderer({ content }: Props) {
                     <button 
                       onClick={() => {
                         navigator.clipboard.writeText(codeText);
-                        // You could add toast notification here
                       }}
                       className="text-xs hover:opacity-80 transition-opacity"
                     >

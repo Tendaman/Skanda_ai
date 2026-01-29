@@ -26,7 +26,6 @@ export default function Home() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // ✅ Append streamed text to last AI message
   const updateLastAiMessage = useCallback((chunk: string) => {
     setMessages((prev) => {
       const idx = prev.length - 1;
@@ -48,12 +47,10 @@ export default function Home() {
     setMessages((prev) => [...prev, m]);
   }, []);
 
-  // ✅ Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ✅ Send message
   const send = useCallback(async (inputWithScreenContext?: string) => {
     const messageToSend = inputWithScreenContext || input;
     if (!messageToSend.trim()) return;
@@ -72,7 +69,6 @@ export default function Home() {
     setInput("");
     setLoading(true);
 
-    // Start empty AI message
     pushMessage({ role: "ai", text: "" });
 
     const controller = new AbortController();
@@ -106,14 +102,13 @@ export default function Home() {
         onopen: async (response) => {
           if (response.ok && response.headers.get('content-type')?.includes('text/event-stream')) {
             console.log('SSE connection established');
-            return; // Success
+            return;
           } else if (response.status >= 400) {
             throw new Error(`Server error: ${response.status}`);
           }
         },
         
         onmessage: (event) => {
-          // The library automatically parses "data: " format
           if (event.data === '[DONE]') {
             console.log('Stream completed');
             return;
@@ -135,19 +130,17 @@ export default function Home() {
         onerror: (err) => {
           if (err instanceof DOMException && err.name === 'AbortError') {
             console.log('Request was aborted');
-            return; // Don't throw for user cancellation
+            return; 
           }
           
           console.error('SSE error:', err);
           updateLastAiMessage(`\n**Error:** ${err.message || 'Connection failed'}`);
-          throw err; // Re-throw to stop retries
+          throw err; 
         },
         
-        // Optional: Configure retry behavior
         openWhenHidden: true,
         fetch: async (input, init) => {
-          // Custom fetch to add timeout
-          const timeout = 30000; // 30 seconds
+          const timeout = 30000;
           const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error('Request timeout')), timeout);
           });
@@ -169,7 +162,6 @@ export default function Home() {
     }
   }, [input, pushMessage, updateLastAiMessage, messages, screenContext]);
 
-  // ✅ Cancel ongoing stream
   const cancelStream = useCallback(() => {
     if (abortController) {
       abortController.abort();
@@ -196,7 +188,6 @@ export default function Home() {
     setLoading(false);
   }, [abortController]);
 
-  // ✅ Global debug hooks
   useEffect(() => {
     (window as any).__SEND__ = send;
     (window as any).__SEND_WITH_SCREEN__ = sendWithScreenContext;

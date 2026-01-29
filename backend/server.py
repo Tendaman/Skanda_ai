@@ -28,7 +28,6 @@ LOCK = threading.Lock()
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    """Handle chat requests and stream AI responses."""
     payload = request.get_json(force=True) or {}
 
     # Return the generator as a streaming response with the correct MIME type
@@ -40,7 +39,6 @@ def chat():
 
 @socketio.on("connect")
 def on_connect():
-    """Handle new client connection."""
     sid = request.sid
     logging.info(f"Client connected: {sid}")
     # initialize client state
@@ -55,14 +53,13 @@ def on_connect():
 
 @socketio.on("start_stream")
 def on_start_stream(data):
-    """Start audio streaming transcription for a client."""
     sid = request.sid
     logging.info(f"start_stream from {sid} payload: {data}")
     with LOCK:
         clients[sid]["raw_buffer"] = b""
         clients[sid]["stopped"] = False
         clients[sid]["paused"] = False
-    # spawn transcription background thread
+
     if clients[sid].get("thread") is None or not clients[sid]["thread"].is_alive():
         t = threading.Thread(target=transcribe_loop, args=(
             sid, clients, LOCK, socketio), daemon=True)
@@ -99,16 +96,12 @@ def on_clear_stream():
     with LOCK:
         if sid in clients:
             clients[sid]["raw_buffer"] = bytearray()
-            # Also clear any pending transcription state by resetting pause
             clients[sid]["paused"] = False
 
 
 @socketio.on("audio_chunk")
 def on_audio_chunk(data):
-    """Handle incoming audio chunks from client."""
-    sid = request.sid
-    # 'data' is binary PCM s16le bytes
-    # append to buffer
+    sid = request.sids
     if not isinstance(data, (bytes, bytearray)):
         # ignore non-binary
         return
@@ -120,7 +113,6 @@ def on_audio_chunk(data):
 
 @socketio.on("stop_stream")
 def on_stop_stream():
-    """Stop audio streaming for a client."""
     sid = request.sid
     logging.info(f"stop_stream from {sid}")
     with LOCK:
@@ -130,14 +122,11 @@ def on_stop_stream():
 
 @socketio.on("disconnect")
 def on_disconnect():
-    """Handle client disconnection."""
     sid = request.sid
     logging.info(f"Client disconnected: {sid}")
     with LOCK:
         if sid in clients:
-            # mark stopped so transcription thread will finalize and exit
             clients[sid]["stopped"] = True
-            # schedule cleanup
 
             def cleanup():
                 time.sleep(1.5)

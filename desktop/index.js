@@ -8,8 +8,8 @@ let win;
 let ffmpegProcess = null;
 let socket = null;
 let isAudioPaused = false;
-let currentRecordingMode = null; // Track the current recording mode
-let isClearingBuffer = false; // Flag to track if we're clearing buffer
+let currentRecordingMode = null; 
+let isClearingBuffer = false; 
 let screenSharingMode = false;
 let registeredShortcuts = [];
 
@@ -36,7 +36,6 @@ function createWindow() {
 
   win.webContents.on('paint', () => {
     if (screenSharingMode) {
-      // In screen sharing mode, make window invisible to screen capture
       win.webContents.setWindowOpenHandler(() => ({
         action: 'deny'
       }));
@@ -75,13 +74,10 @@ function createWindow() {
   });
 }
 
-// Function to register global shortcuts
 function registerGlobalShortcuts() {
-  // Import globalShortcut here to avoid issues
   const { globalShortcut } = require('electron');
   
   try {
-    // Register example shortcuts (modify these as needed)
     const shortcuts = [
       {
         accelerator: 'CommandOrControl+Shift+9',
@@ -155,7 +151,6 @@ function registerGlobalShortcuts() {
   }
 }
 
-// Function to unregister all global shortcuts
 function unregisterGlobalShortcuts() {
   const { globalShortcut } = require('electron');
   
@@ -170,7 +165,6 @@ function unregisterGlobalShortcuts() {
   }
 }
 
-// Handle toggle states from renderer
 ipcMain.on('toggle-invisibility', (event, enabled) => {
   
   if (enabled) {
@@ -194,18 +188,15 @@ ipcMain.on('toggle-invisibility', (event, enabled) => {
 
 ipcMain.on('toggle-taskbar', (event, hidden) => {
   if (hidden) {
-    // Hide app from taskbar
     console.log('Hiding app from taskbar');
     win.setSkipTaskbar(true);
     
-    // Also hide from alt-tab switcher on Windows
     if (process.platform === 'win32') {
       win.setAlwaysOnTop(true, 'screen-saver');
       win.setVisibleOnAllWorkspaces(true);
     }
     
   } else {
-    // Show app in taskbar
     console.log('Showing app in taskbar');
     win.setSkipTaskbar(false);
     
@@ -226,18 +217,15 @@ ipcMain.on('toggle-commands', (event, enabled) => {
   }
 });
 
-// In desktop\index.js, add this IPC handler and track window state:
 let isWindowMinimized = false;
 
 ipcMain.on('toggle-window-minimize', () => {
   if (win) {
     if (win.isMinimized()) {
-      // Restore the window if it's minimized
       win.restore();
       isWindowMinimized = false;
       console.log('Window restored');
     } else {
-      // Minimize the window
       win.minimize();
       isWindowMinimized = true;
       console.log('Window minimized');
@@ -247,22 +235,18 @@ ipcMain.on('toggle-window-minimize', () => {
 
 ipcMain.on('start-voice-recording', () => {
   console.log('Starting voice recording via command');
-  // This will be handled by the renderer process
 });
 
 ipcMain.on('start-system-recording', () => {
   console.log('Starting system recording via command');
-  // This will be handled by the renderer process
 });
 
 ipcMain.on('start-both-recording', () => {
   console.log('Starting both recording via command');
-  // This will be handled by the renderer process
 });
 
 ipcMain.on('stop-recording', () => {
   console.log('Stopping recording via command');
-  // This will be handled by the renderer process
 });
 
 ipcMain.on('toggle-audio-pause-resume', () => {
@@ -270,10 +254,8 @@ ipcMain.on('toggle-audio-pause-resume', () => {
   
   if (ffmpegProcess) {
     if (isAudioPaused) {
-      // Resume audio using existing handler
       ipcMain.emit('audio-resume');
     } else {
-      // Pause audio using existing handler
       ipcMain.emit('audio-pause');
     }
   } else {
@@ -281,10 +263,8 @@ ipcMain.on('toggle-audio-pause-resume', () => {
   }
 });
 
-// NEW: Audio buffer clear command handler - SIMPLIFIED
 ipcMain.on('delete-audio-buffer', () => {
   console.log('Clear audio buffer via command');
-  // Use existing handler
   ipcMain.emit('audio-delete');
 });
 
@@ -292,14 +272,12 @@ ipcMain.on('audio-pause', () => {
   if (ffmpegProcess && !isAudioPaused) {
     isAudioPaused = true;
     
-    // Pause ffmpeg process (Unix-like systems)
     if (process.platform !== 'win32') {
       ffmpegProcess.kill('SIGSTOP');
     } else {
       console.log('Audio paused (Windows)');
     }
     
-    // Send pause to backend
     if (socket && socket.connected) {
       socket.emit("pause_stream");
     }
@@ -312,14 +290,12 @@ ipcMain.on('audio-resume', () => {
   if (ffmpegProcess && isAudioPaused) {
     isAudioPaused = false;
     
-    // Resume ffmpeg process (Unix-like systems)
     if (process.platform !== 'win32') {
       ffmpegProcess.kill('SIGCONT');
     } else {
       console.log('Audio resumed (Windows)');
     }
     
-    // Send resume to backend
     if (socket && socket.connected) {
       socket.emit("resume_stream");
     }
@@ -331,33 +307,26 @@ ipcMain.on('audio-resume', () => {
 ipcMain.on('audio-delete', () => {
   console.log('Audio buffer clear requested');
   
-  // Set clearing flag to prevent stop_stream emission
   isClearingBuffer = true;
   
-  // Clear backend buffer first
   if (socket && socket.connected) {
     console.log('Emitting clear_stream to backend');
     socket.emit("clear_stream");
   }
   
-  // If ffmpeg is running and we have a current mode, restart it
   if (ffmpegProcess && currentRecordingMode) {
     console.log(`Restarting ffmpeg for mode: ${currentRecordingMode}`);
     
-    // Remove the close listener temporarily to prevent stop_stream emission
     ffmpegProcess.removeAllListeners('close');
     
-    // Kill the current ffmpeg process
     try {
-      ffmpegProcess.kill('SIGKILL'); // Force kill to ensure quick restart
+      ffmpegProcess.kill('SIGKILL');
     } catch (err) {
       console.error('Error killing ffmpeg:', err);
     }
     
-    // Clear the process reference
     ffmpegProcess = null;
-    
-    // Restart ffmpeg after a short delay
+
     setTimeout(() => {
       console.log(`Restarting audio capture with mode: ${currentRecordingMode}`);
       const success = startAudioCapture(currentRecordingMode);
@@ -368,17 +337,14 @@ ipcMain.on('audio-delete', () => {
         console.error('Failed to restart ffmpeg after clear');
       }
       
-      // Reset clearing flag
       isClearingBuffer = false;
     }, 100);
   } else {
     console.log('No ffmpeg process to restart or no current mode');
-    // Reset clearing flag
     isClearingBuffer = false;
   }
 });
 
-// Handle app events
 app.whenReady().then(() => {
   createWindow();
   console.log('App ready, global shortcuts can now be registered');
@@ -440,10 +406,8 @@ function startAudioCapture(mode) {
     
     console.log(`[2] Ensuring socket connection...`);
     
-    // First, ensure we have a socket connection
     ensureSocketConnected();
     
-    // Wait for socket to be connected
     const checkConnection = () => {
       if (socket && socket.connected) {
         console.log(`[3.2] Socket connected: ${socket.id}, proceeding with capture...`);
@@ -454,7 +418,6 @@ function startAudioCapture(mode) {
       }
     };
     
-    // Start checking for connection
     checkConnection();
     
     function proceedWithCapture() {
@@ -515,7 +478,6 @@ function startAudioCapture(mode) {
         
         console.log(`[6] FFmpeg started with PID: ${ffmpegProcess.pid}`);
         
-        // Use your existing setupFFmpegProcess function
         setupFFmpegProcess();
         
         console.log(`[7] Emitting start_stream to backend`);
@@ -532,11 +494,9 @@ function startAudioCapture(mode) {
       } catch (err) {
         console.error(`Failed to start ${mode} capture:`, err);
         
-        // Try alternative approaches if direct capture fails
         if (mode === "system") {
           console.info("[9] Trying alternative system audio capture methods...");
           
-          // Method 1: Try with "Stereo Mix"
           try {
             ffmpegProcess = spawn("ffmpeg", [
               "-f", "dshow",
@@ -589,10 +549,9 @@ function setupFFmpegProcess() {
 
 ipcMain.on("audio-start", (event, mode) => {
   console.log("Starting audio capture with mode:", mode);
-  currentRecordingMode = mode; // Store the current mode
+  currentRecordingMode = mode;
   
   if (ffmpegProcess) {
-    // Stop existing capture first
     try {
       ffmpegProcess.kill("SIGINT");
     } catch (err) {
@@ -604,7 +563,6 @@ ipcMain.on("audio-start", (event, mode) => {
   const success = startAudioCapture(mode);
   
   if (!success) {
-    // Notify renderer of failure
     if (win && win.webContents) {
       win.webContents.send("audio-error", `Failed to start ${mode} capture`);
     }
@@ -626,11 +584,10 @@ ipcMain.on("audio-stop", () => {
     try { ffmpegProcess.kill(); } catch(e) {}
   } finally {
     ffmpegProcess = null;
-    currentRecordingMode = null; // Clear the mode when stopping
+    currentRecordingMode = null; 
   }
 });
 
-// Handle audio error messages
 ipcMain.on("audio-error", (event, message) => {
   if (win && win.webContents) {
     win.webContents.send("audio-error", message);
@@ -642,18 +599,14 @@ ipcMain.on('capture-screenshot', async (event) => {
     const currentWindow = BrowserWindow.fromWebContents(event.sender);
     let wasVisible = true;
     
-    // Hide the current window temporarily to capture what's behind it
     if (currentWindow && currentWindow.isVisible()) {
       wasVisible = true;
       currentWindow.hide();
-      // Small delay to ensure window is hidden before capture
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Get all available displays
     const displays = screen.getAllDisplays();
     
-    // Capture screens from all displays and combine them
     const allScreenshots = [];
     
     for (const display of displays) {
@@ -668,7 +621,6 @@ ipcMain.on('capture-screenshot', async (event) => {
         });
 
         if (sources.length > 0) {
-          // Take the first source (should be the screen)
           const screenshot = sources[0].thumbnail;
           allScreenshots.push({
             display,
@@ -685,12 +637,10 @@ ipcMain.on('capture-screenshot', async (event) => {
       throw new Error("No screens could be captured");
     }
 
-    // For now, just send the primary display screenshot
     const primaryDisplay = screen.getPrimaryDisplay();
     const primaryScreenshot = allScreenshots.find(s => s.display.id === primaryDisplay.id);
     
     if (!primaryScreenshot) {
-      // Fallback to first screenshot
       const firstScreenshot = allScreenshots[0];
       const pngBuffer = firstScreenshot.screenshot.toPNG();
       
@@ -707,7 +657,6 @@ ipcMain.on('capture-screenshot', async (event) => {
       });
     }
 
-    // Show the window again if it was visible
     if (currentWindow && wasVisible) {
       currentWindow.show();
     }
@@ -715,7 +664,6 @@ ipcMain.on('capture-screenshot', async (event) => {
   } catch (error) {
     console.error('Screenshot capture error:', error);
     
-    // Ensure window is shown even on error
     const currentWindow = BrowserWindow.fromWebContents(event.sender);
     if (currentWindow) {
       currentWindow.show();
@@ -724,7 +672,6 @@ ipcMain.on('capture-screenshot', async (event) => {
     event.sender.send('screenshot-error', error.message || 'Unknown error');
   }
 });
-
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

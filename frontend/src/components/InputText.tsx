@@ -18,7 +18,6 @@ import { IconPlus } from "@tabler/icons-react";
 import { ArrowUpIcon, ChevronDown, Play, Square, Mic, Volume2, MicVocal, AlertCircle, Eye } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
 import AudioControls from "./AudioControls";
@@ -65,44 +64,40 @@ export default function InputText({
   const [isAnalyzingScreen, setIsAnalyzingScreen] = useState(false);
  
   const committedRef = useRef<string>("");
-  // Setup electron audio listener
+  
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    
-    const { audioAPI } = window;
-    if (!audioAPI || !audioAPI.onText) {
-      console.warn("audioAPI not found (are you running inside Electron with preload.js?)");
-      return;
-    }
+  if (typeof window === "undefined") return;
+  
+  const { audioAPI } = window;
+  if (!audioAPI || !audioAPI.onText) {
+    console.warn("audioAPI not found (are you running inside Electron with preload.js?)");
+    return;
+  }
 
-    // Listen for transcription text
-    audioAPI.onText((text: string) => {
-      if (typeof text !== "string") return;
-      setInput(text);
-      committedRef.current = text;
-    });
+  let isMounted = true;
 
-    
+  const handleText = (text: string) => {
+    if (!isMounted || typeof text !== "string") return;
+    setInput(text);
+    committedRef.current = text;
+  };
 
-    // Listen for errors
-    audioAPI.onError((message: string) => {
-      setError(message);
-      setIsRecording(false);
-      toast.error("Audio Capture Error", {
-        description: message,
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
-    });
+  const handleError = (message: string) => {
+    if (!isMounted) return;
+    setError(message);
+    setIsRecording(false);
+  };
 
-    return () => {
-      // Cleanup if needed
-    };
-  }, [setInput]);
+  audioAPI.onText(handleText);
+  audioAPI.onError(handleError);
+
+  return () => {
+    isMounted = false;
+  };
+}, [setInput]);
 
   
-  // Change the useEffect to ONLY trigger on isRecording change
   useEffect(() => {
-    // Only send when recording stops AND we have input
     if (!isRecording && input.trim() && mode !== "keyboard") {
       let currentInput = input.trim();
       
@@ -141,10 +136,6 @@ export default function InputText({
     (window as any).__TOGGLE_SCREEN_ANALYZER__ = () => {
       setScreenReaderEnabled(prev => {
         const newState = !prev;
-        toast.info(newState ? "Screen Reader Enabled" : "Screen Reader Disabled", {
-          description: newState ? "Screen will be analyzed when sending messages" : "Screen analysis disabled",
-          duration: 2000,
-        });
         return newState;
       });
     };
@@ -177,7 +168,6 @@ export default function InputText({
       setError(null);
       committedRef.current = "";
     } else {
-      // Stop recording
       audioAPI.stop();
       setIsRecording(false);
       setIsPaused(false);
@@ -186,16 +176,13 @@ export default function InputText({
 
   const handleRecordingShortcut = (shortcutMode: "voice" | "system" | "both") => {
     if (mode !== shortcutMode) {
-      // Switch mode only, don't start recording
       handleModeChange(shortcutMode);
     } else {
-      // Already in this mode - toggle recording
       toggleRecording();
     }
   };
 
   const handleModeChange = (newMode: "keyboard" | "voice" | "system" | "both") => {
-    // If currently recording, stop first
     if (isRecording) {
       const { audioAPI } = window as any;
       if (audioAPI && audioAPI.stop) {
@@ -212,12 +199,10 @@ export default function InputText({
 
   const handlePausePlayToggle = (paused: boolean) => {
     setIsPaused(paused);
-    // AudioControls will handle the actual API calls
   };
 
 
   const handleDeleteAudio = () => {
-  // Clear the input and pending voice message
     setInput("");
     committedRef.current = "";
   };
@@ -259,19 +244,12 @@ export default function InputText({
       
       if (analysis._error) {
         console.error("Screen analysis error:", analysis._error, analysis._raw);
-        toast.warning("Partial analysis", {
-          description: "Screen was analyzed but couldn't parse full response",
-        });
       }
 
       return analysis;
       
     } catch (error) {
       console.error("Screen capture/analysis error:", error);
-      toast.error("Screen Analysis Failed", {
-        description: error instanceof Error ? error.message : "Unknown error",
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
       return null;
     } finally {
       setIsAnalyzingScreen(false);
@@ -281,7 +259,6 @@ export default function InputText({
   const handleSendWithScreenAnalysis = async (voiceTranscription?: string) => {
     const messageToUse = voiceTranscription || input;
     if (!messageToUse.trim() && !screenReaderEnabled) {
-      // Normal send without screen analysis
       send();
       setInput("");
       committedRef.current = "";
@@ -292,15 +269,10 @@ export default function InputText({
       let screenContext = "";
       
       if (screenReaderEnabled) {
-        toast.info("Analyzing screen...", {
-          icon: <Eye className="h-4 w-4" />,
-          duration: 3000,
-        });
 
         const analysis = await captureAndAnalyzeScreen();
         
         if (analysis) {
-          // Format the screen analysis for the AI
           screenContext = `
   SCREEN ANALYSIS CONTEXT:
   ${analysis.summary ? `Summary: ${analysis.summary}` : ''}
@@ -314,16 +286,13 @@ export default function InputText({
     : ''}
   `;
 
-          // Clear input after capturing screen
           setInput("");
           committedRef.current = "";
           
-          // Use the page's send function with screen context
           const sendWithScreen = (window as any).__SEND_WITH_SCREEN__;
           if (sendWithScreen) {
             sendWithScreen(screenContext, messageToUse.trim());
           } else {
-            // Fallback to regular send
             const combinedInput = messageToUse.trim() 
               ? screenContext + "\nUSER QUERY: " + messageToUse
               : screenContext + "\nWhat do you see on my screen? Please describe it and suggest actions based on what you see.";
@@ -334,11 +303,8 @@ export default function InputText({
           }
           return;
         } else {
-          // If analysis failed but screen reader is enabled, still send with note
           screenContext = "NOTE: Screen analysis failed.\n\n";
-          toast.warning("Screen analysis failed, sending without visual context");
 
-          // Send with failure note
           const combinedInput = screenContext + (messageToUse.trim() ? "\nUSER QUERY: " + messageToUse: "");
           send(combinedInput);
           setInput("");
@@ -347,20 +313,13 @@ export default function InputText({
         }
       }
 
-      // Regular send without screen context
       send(messageToUse);
       
-      // Clear input after sending
       setInput("");
       committedRef.current = "";
       
     } catch (error) {
       console.error("Error in send with screen analysis:", error);
-      toast.error("Failed to send message", {
-        description: error instanceof Error ? error.message : "An error occurred while processing your request",
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
-       
     }
   };
 
@@ -368,7 +327,7 @@ export default function InputText({
     if (mode === "keyboard") return <IconPlus size={14} />;
     if (mode === "voice") return <Mic size={14} />;
     if (mode === "system") return <Volume2 size={14} />;
-    return <MicVocal size={14} />; // both mode
+    return <MicVocal size={14} />;
   };
 
   const getButtonVariant = () => {
@@ -477,7 +436,6 @@ export default function InputText({
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Audio controls appear here, next to dropdown */}
             <AudioControls 
               mode={mode}
               isRecording={isRecording}

@@ -1,12 +1,5 @@
 # backend\screen_analyser.py
 
-"""
-Screen analyser: send screenshot bytes to Qwen3-VL-8B-Instruct
-and return a structured JSON representation.
-
-The screenshot NEVER touches disk.
-"""
-
 import os
 import re
 import json
@@ -31,9 +24,6 @@ VISION_MODEL = os.environ.get("VISION_MODEL", "qwen/qwen3-vl-8b-instruct")
 
 
 def _vision_prompt() -> str:
-    """
-    Returns the prompt instructing the vision model to output ONLY clean JSON.
-    """
     return (
         "You will receive an image. Return ONLY valid JSON with the schema:\n"
         "{\n"
@@ -50,18 +40,13 @@ def _vision_prompt() -> str:
 
 
 def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
-    """
-    Extracts a JSON object from a possibly messy model output.
-    """
     text = text.strip()
 
-    # Attempt direct load
     try:
         return json.loads(text)
     except Exception:
         pass
-
-    # Try to locate { ... } JSON block
+    
     brace_stack = []
     start_idx = None
     for i, ch in enumerate(text):
@@ -83,10 +68,6 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
 
 
 def analyze_screenshot(image_bytes: bytes) -> Dict[str, Any]:
-    """
-    Sends screenshot bytes to Qwen3-VL-8B-Instruct and returns parsed JSON.
-    Screenshot is NOT saved to disk.
-    """
 
     if client is None:
         raise RuntimeError("Vision model client not initialized.")
@@ -118,8 +99,6 @@ def analyze_screenshot(image_bytes: bytes) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("Vision model error:")
         raise RuntimeError(f"Vision model failed: {e}")
-
-    # Extract assistant text
     try:
         text = res.choices[0].message.content.strip()
     except Exception:
@@ -136,7 +115,6 @@ def analyze_screenshot(image_bytes: bytes) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    # For manual testing ONLY
     import sys
     if len(sys.argv) < 2:
         print("Usage: python backend/screen_analyser.py <image_path>")
