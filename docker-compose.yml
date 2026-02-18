@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - FLASK_ENV=production
+      # Pass through environment variables from .env
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL}
+      - AI_MODEL=${AI_MODEL}
+      - VISION_MODEL=${VISION_MODEL}
+    volumes:
+      # Mount source for development (optional)
+      # - ./backend:/app
+      - backend_data:/app/data
+    restart: unless-stopped
+    networks:
+      - skanda-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # URL for the browser to access backend (public URL)
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - skanda-net
+
+networks:
+  skanda-net:
+
+
+volumes:
+  backend_data:

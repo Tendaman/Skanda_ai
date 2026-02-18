@@ -12,7 +12,7 @@ declare global {
       toggleTaskbar: (hidden: boolean) => void;
       toggleCommands: (enabled: boolean) => void;
       reportScreenSharing: (isSharing: boolean) => void;
-      onCommandExecuted: (callback: (command: string) => void) => void;
+      onCommandExecuted: (callback: (command: string) => void) => (() => void) | void;
       toggleWindowMinimize: (isMinimized: boolean) => void;
     };
     audioAPI?: {

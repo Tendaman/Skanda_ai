@@ -1,4 +1,3 @@
-# backend\server.py
 import os
 import logging
 import threading
@@ -17,10 +16,15 @@ from screen_analyser import analyze_screenshot
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
-app = Flask(__name__)
-CORS(app)
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+FRONTEND_URL = os.environ.get("NEXT_PUBLIC_FRONTEND_URL", "http://localhost:3000")
+
+app = Flask(__name__)
+# Restrict CORS to frontend URL
+CORS(app, resources={r"/*": {"origins": FRONTEND_URL}})
+
+# Restrict SocketIO to frontend URL
+socketio = SocketIO(app, cors_allowed_origins=[FRONTEND_URL], async_mode="threading")
 
 clients: Dict[str, Dict] = {}
 LOCK = threading.Lock()
@@ -44,7 +48,7 @@ def on_connect():
     # initialize client state
     with LOCK:
         clients[sid] = {
-            "raw_buffer": b"",
+            "raw_buffer": bytearray(),
             "stopped": False,
             "paused": False,
             "thread": None
@@ -56,7 +60,7 @@ def on_start_stream(data):
     sid = request.sid
     logging.info(f"start_stream from {sid} payload: {data}")
     with LOCK:
-        clients[sid]["raw_buffer"] = b""
+        clients[sid]["raw_buffer"] = bytearray()
         clients[sid]["stopped"] = False
         clients[sid]["paused"] = False
 
@@ -101,14 +105,14 @@ def on_clear_stream():
 
 @socketio.on("audio_chunk")
 def on_audio_chunk(data):
-    sid = request.sids
+    sid = request.sid
     if not isinstance(data, (bytes, bytearray)):
         # ignore non-binary
         return
     with LOCK:
         if sid not in clients:
             return
-        clients[sid]["raw_buffer"] += bytes(data)
+        clients[sid]["raw_buffer"].extend(data)
 
 
 @socketio.on("stop_stream")

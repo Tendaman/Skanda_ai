@@ -40,8 +40,7 @@ def generate_chat_response(payload: Dict[str, Any]) -> Generator[str, None, None
     model = payload.get("model", DEFAULT_MODEL)
     messages, prior_reasoning = _normalize_messages(payload)
     extra_body = {
-        "reasoning": {"enabled": True},
-        "transforms": ["middle-out"]
+        "reasoning": {"enabled": True}
     }
     if prior_reasoning:
         extra_body["reasoning"]["previous"] = prior_reasoning
@@ -56,11 +55,17 @@ def generate_chat_response(payload: Dict[str, Any]) -> Generator[str, None, None
         )
         
         for chunk in response_stream:
-            delta_content = chunk.choices[0].delta.content
-            if delta_content:
-                yield f"data: {delta_content}\n\n"
+            if hasattr(chunk, 'choices') and chunk.choices:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content:
+                    yield f"data: {delta.content}\n\n"
         
         yield "data: [DONE]\n\n" 
+
+    except Exception as e:
+        logging.error(f"Model generation failed: {e}")
+        yield f"data: [ERROR] {str(e)}\n\n"
+ 
 
     except Exception as e:
         logging.exception("model call failed during streaming")

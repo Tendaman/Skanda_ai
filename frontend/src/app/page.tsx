@@ -7,6 +7,7 @@ import { ChatTypeWriter } from "@/components/ChatTypeWriter";
 import { Button } from "@/components/ui/button";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
+import { ReloadButton } from "@/components/ReloadButton";
 
 const BACKEND =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -58,14 +59,14 @@ export default function Home() {
     const userText = input.trim();
     const rawInput = messageToSend.trim();
 
-    const displayText = userText || 
-    (rawInput.includes("USER QUERY:") 
-      ? rawInput.split("USER QUERY:")[1]?.trim() || rawInput 
-      : rawInput);
+    const displayText = userText ||
+      (rawInput.includes("USER QUERY:")
+        ? rawInput.split("USER QUERY:")[1]?.trim() || rawInput
+        : rawInput);
 
     const isFreshStart = messages.length === 0;
 
-    pushMessage({ role: "user", text: displayText, rawInput: userText !== rawInput ? rawInput : undefined  });
+    pushMessage({ role: "user", text: displayText, rawInput: userText !== rawInput ? rawInput : undefined });
     setInput("");
     setLoading(true);
 
@@ -77,7 +78,7 @@ export default function Home() {
     try {
       await fetchEventSource(`${BACKEND}/chat`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream'
         },
@@ -98,53 +99,50 @@ export default function Home() {
           ],
         }),
         signal: controller.signal,
-        
+
         onopen: async (response) => {
           if (response.ok && response.headers.get('content-type')?.includes('text/event-stream')) {
-            console.log('SSE connection established');
             return;
           } else if (response.status >= 400) {
             throw new Error(`Server error: ${response.status}`);
           }
         },
-        
+
         onmessage: (event) => {
           if (event.data === '[DONE]') {
-            console.log('Stream completed');
             return;
           }
-          
+
           if (event.data && event.data !== '[ERROR]') {
             updateLastAiMessage(event.data);
           } else if (event.data?.startsWith('[ERROR]')) {
             throw new Error(event.data.replace('[ERROR] ', ''));
           }
         },
-        
+
         onclose: () => {
-          console.log('Connection closed');
           setLoading(false);
           setAbortController(null);
         },
-        
+
         onerror: (err) => {
           if (err instanceof DOMException && err.name === 'AbortError') {
             console.log('Request was aborted');
-            return; 
+            return;
           }
-          
+
           console.error('SSE error:', err);
           updateLastAiMessage(`\n**Error:** ${err.message || 'Connection failed'}`);
-          throw err; 
+          throw err;
         },
-        
+
         openWhenHidden: true,
         fetch: async (input, init) => {
           const timeout = 30000;
           const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error('Request timeout')), timeout);
           });
-          
+
           const fetchPromise = fetch(input, init);
           return Promise.race([fetchPromise, timeoutPromise]);
         }
@@ -176,7 +174,7 @@ export default function Home() {
     setScreenContext(screenContext);
     await send(combinedInput);
   }, [send]);
- 
+
   const clearChatMessages = useCallback(() => {
     setMessages([]);
     setScreenContext(null);
@@ -187,6 +185,71 @@ export default function Home() {
     }
     setLoading(false);
   }, [abortController]);
+
+  const regenerateResponse = useCallback(async (userMessageIndex: number) => {
+    // Find the user message
+    const userMsg = messages[userMessageIndex];
+    if (!userMsg || userMsg.role !== 'user') return;
+
+    // Remove the user message and all messages after it
+    const newMessages = messages.slice(0, userMessageIndex); // Remove the user message too
+    setMessages(newMessages);
+
+    // Regenerate the response - this will add a new user message
+    const rawInput = userMsg.rawInput || userMsg.text;
+    setInput(rawInput);
+
+    // Small delay to ensure state updates before sending
+    setTimeout(() => {
+      send(rawInput); // This will add a new user message
+    }, 100);
+  }, [messages, send]);
+
+  const isReloadingRef = useRef(false);
+
+useEffect(() => {
+  const handleReloadLastMessage = () => {
+    // Prevent multiple simultaneous reloads
+    if (isReloadingRef.current) {
+      console.log('Reload already in progress, skipping...');
+      return;
+    }
+    
+    console.log('Reload last message triggered via shortcut');
+    
+    // Find the last user message from the current messages state
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        console.log(`Found last user message at index ${i}, regenerating...`);
+        isReloadingRef.current = true;
+        
+        // Call regenerateResponse and reset the lock after it completes
+        Promise.resolve(regenerateResponse(i)).finally(() => {
+          // Add a small delay before allowing another reload
+          setTimeout(() => {
+            isReloadingRef.current = false;
+          }, 500);
+        });
+        break;
+      }
+    }
+  };
+
+  // Listen for the command from Electron
+  if (window.electronAPI?.onCommandExecuted) {
+    const cleanup = window.electronAPI.onCommandExecuted((command) => {
+      if (command === 'reload-last-message') {
+        handleReloadLastMessage();
+      }
+    });
+    
+    return () => {
+      if (typeof cleanup === 'function') {
+        cleanup();
+      }
+    };
+  }
+}, [messages, regenerateResponse]); // Add dependencies
 
   useEffect(() => {
     (window as any).__SEND__ = send;
@@ -212,18 +275,23 @@ export default function Home() {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`flex ${
-              m.role === "user" ? "justify-end" : "justify-start"
-            }`}
-          >
-            <div
-              className={`p-2 shadow-sm max-w-md whitespace-pre-wrap my-2 ${
-                m.role === "user"
-                  ? "bg-blue-600 text-white rounded-tr-xl rounded-tl-xl rounded-bl-xl"
-                  : "bg-gray-100 text-gray-800 rounded-tr-xl rounded-tl-xl rounded-br-xl"
+            className={`flex ${m.role === "user" ? "justify-end" : "justify-start"
               }`}
+          >
+            {m.role === "user" && (
+              <ReloadButton
+                onClick={() => regenerateResponse(i)}
+                disabled={loading}
+                className="mr-2 mb-2"
+              />
+            )}
+            <div
+              className={`p-2 shadow-sm max-w-md whitespace-pre-wrap my-2 ${m.role === "user"
+                ? "bg-blue-600 text-white rounded-tr-xl rounded-tl-xl rounded-bl-xl"
+                : "bg-gray-100 text-gray-800 rounded-tr-xl rounded-tl-xl rounded-br-xl"
+                }`}
             >
-              
+
               {m.role === "user" ? (
                 <div className="whitespace-pre-wrap">{m.text}</div>
               ) : (
@@ -238,7 +306,7 @@ export default function Home() {
             </div>
             {loading && i === messages.length - 1 && m.role === "ai" && (
               <div className="flex items-end ml-2 mb-2">
-                <Button 
+                <Button
                   onClick={cancelStream}
                   className="text-xs bg-red-500 text-white hover:bg-red-600 px-3 py-1.5 rounded-md shadow-sm"
                   size="sm"
@@ -249,7 +317,7 @@ export default function Home() {
             )}
           </div>
         ))}
-        
+
         <div ref={messagesEndRef} />
       </div>
     </div>
