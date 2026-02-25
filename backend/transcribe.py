@@ -4,52 +4,110 @@ import logging
 import wave
 import threading
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List
 from faster_whisper import WhisperModel
 
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH_BYTES = 2 
 CHANNELS = 1
-# Limit buffer to ~30 seconds to prevent infinite re-processing slowdown
-MAX_BUFFER_SECONDS = 30
-MAX_BUFFER_BYTES = SAMPLE_RATE * SAMPLE_WIDTH_BYTES * CHANNELS * MAX_BUFFER_SECONDS
 
-# Load model once. "int8" is faster on CPU.
-whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+# Optimized model config for Ryzen 5 3500U
+whisper_model = WhisperModel(
+    "base", 
+    device="cpu", 
+    compute_type="int8",
+    cpu_threads=4,  # Match your physical core count
+    num_workers=1   # Keep workers low for CPU
+)
+
+# Cache WAV header to avoid recreating it every time
+WAV_HEADER_CACHE = None
+WAV_HEADER_LENGTH = 44  # Standard WAV header size
+
+def create_wav_header(data_length):
+    """
+    Create WAV header once and reuse it with updated data length.
+    This is MUCH faster than recreating the wave object each time.
+    """
+    global WAV_HEADER_CACHE
+    
+    if WAV_HEADER_CACHE is None:
+        with io.BytesIO() as header_io:
+            with wave.open(header_io, "wb") as w:
+                w.setnchannels(CHANNELS)
+                w.setsampwidth(SAMPLE_WIDTH_BYTES)
+                w.setframerate(SAMPLE_RATE)
+                # Write dummy data to generate header
+                w.writeframes(b'\x00' * WAV_HEADER_LENGTH)
+            header_io.seek(0)
+            WAV_HEADER_CACHE = header_io.read()[:WAV_HEADER_LENGTH]
+    
+    # Update the data chunk size in the header (positions 40-43 for data size)
+    data_size_bytes = data_length.to_bytes(4, 'little')
+    header = bytearray(WAV_HEADER_CACHE)
+    header[40:44] = data_size_bytes  # Update data chunk size
+    # Also update RIFF chunk size (positions 4-7)
+    riff_size = (data_length + WAV_HEADER_LENGTH - 8).to_bytes(4, 'little')
+    header[4:8] = riff_size
+    
+    return bytes(header)
 
 def analyze_audio_buffer(raw_bytes):
     """
+    Optimized transcription with header caching.
     Transcribe raw audio bytes using in-memory processing.
     Returns the full text.
     """
-    if not raw_bytes:
+    if not raw_bytes or len(raw_bytes) < SAMPLE_RATE * SAMPLE_WIDTH_BYTES * CHANNELS * 0.3:  # Less than 0.3 seconds
         return ""
+    
+    try:
+        # Create complete WAV file with cached header
+        wav_data = create_wav_header(len(raw_bytes)) + raw_bytes
+        wav_io = io.BytesIO(wav_data)
         
-    with io.BytesIO() as wav_io:
-        with wave.open(wav_io, "wb") as w:
-            w.setnchannels(CHANNELS)
-            w.setsampwidth(SAMPLE_WIDTH_BYTES)
-            w.setframerate(SAMPLE_RATE)
-            w.writeframes(raw_bytes)
-        
-        wav_io.seek(0)
-        
-        # vad_filter=True skips silent parts, speeding up processing
+        # Optimized transcription parameters for speed
         segments, _ = whisper_model.transcribe(
             wav_io, 
             language="en", 
-            beam_size=5,
+            beam_size=3,  # Reduced from 5 for speed
+            best_of=3,    # Limit candidates
+            patience=0.5, # Lower patience = faster
+            temperature=0.0,  # Greedy decoding = faster
+            compression_ratio_threshold=2.4,  # Slightly higher to keep more text
+            log_prob_threshold=-1.0,  # Skip low confidence
+            no_speech_threshold=0.6,  # Skip silence faster
+            condition_on_previous_text=True,  # Keep context for better accuracy
             vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500)
+            vad_parameters=dict(
+                min_silence_duration_ms=500,
+                threshold=0.5,
+                speech_pad_ms=400,  # Less padding = faster
+                min_speech_duration_ms=250  # Ignore very short speech
+            )
         )
-        return " ".join([seg.text for seg in segments]).strip()
+        
+        text = " ".join([seg.text for seg in segments]).strip()
+        return text
+        
+    except Exception as e:
+        logging.exception(f"Error in analyze_audio_buffer: {e}")
+        return ""
 
 def transcribe_loop(sid, clients, LOCK, socketio):
     logging.info(f"Transcription thread started for {sid}")
     
-    # Store committed text (text that has shifted out of the buffer)
-    committed_text = ""
-    last_buffer_text = ""
+    # Store full accumulated text
+    accumulated_text = ""
+    last_emitted_text = ""
+    
+    # Track the last position we transcribed up to
+    last_transcription_pos = 0
+    last_transcription_time = time.time()
+    
+    # Pre-calculate minimum audio for transcription (0.5 seconds)
+    MIN_AUDIO_FOR_TRANSCRIPTION = SAMPLE_RATE * SAMPLE_WIDTH_BYTES * CHANNELS // 2
+    FORCE_TRANSCRIPTION_INTERVAL = 2.0  # seconds
     
     try:
         while True:
@@ -58,31 +116,14 @@ def transcribe_loop(sid, clients, LOCK, socketio):
                 if sid not in clients:
                     logging.info(f"No client state for {sid}, terminating thread")
                     return
+                
                 state = clients[sid]
                 stop_flag = state.get("stopped", False)
                 paused_flag = state.get("paused", False)
                 
-                # Copy buffer to avoid holding lock during transcription
+                # Get the full buffer - NO TRIMMING!
                 raw_buffer = state.get("raw_buffer", bytearray())
-                
-                # If buffer is too large, trim it and commit the text logic would be complex.
-                # simpler approach: Just clamp the buffer for performance, 
-                # but we might lose some old context if we don't manage `committed_text` carefully.
-                # For this iteration, we accept a sliding window of ~30s for the "partial" text.
-                if len(raw_buffer) > MAX_BUFFER_BYTES:
-                    # Keep the last MAX_BUFFER_BYTES
-                    # But we should probably try to keep "committed_text" up to date?
-                    # Since the frontend appends, we need to be careful.
-                    # Actually, the frontend just displays "mic-text". 
-                    # If we change `prev_text` logic in frontend, it might be weird.
-                    # Let's assume frontend replaces or appends? 
-                    # Checking desktop/index.js: `win.webContents.send("mic-text", data.partial || "");`
-                    # It just sends the text.
-                    
-                    # We will just trim the buffer. 
-                    # To avoid "losing" text, we should ideally rely on the frontend to keep history,
-                    # OR we maintain a `committed_text` on backend.
-                    pass 
+                current_len = len(raw_buffer)
 
             # 2. HANDLE CONTROL FLAGS
             if paused_flag:
@@ -90,68 +131,77 @@ def transcribe_loop(sid, clients, LOCK, socketio):
                 continue
 
             # 3. STOP CONDITION
-            if not raw_buffer and stop_flag:
-                # Buffer empty and stopped
-                with LOCK:
-                    if sid in clients:
-                        clients[sid]["raw_buffer"] = bytearray()
+            if stop_flag and current_len == 0:
                 break
                 
-            if not raw_buffer:
+            if current_len == 0:
+                time.sleep(0.5)
+                continue
+
+            # 4. DECIDE WHETHER TO TRANSCRIBE
+            has_new_audio = (current_len - last_transcription_pos) > MIN_AUDIO_FOR_TRANSCRIPTION
+            time_since_last = time.time() - last_transcription_time
+            force_transcribe = time_since_last > FORCE_TRANSCRIPTION_INTERVAL
+            
+            if not (has_new_audio or force_transcribe):
                 time.sleep(0.2)
                 continue
 
-            # 4. TRANSCRIBE
+            # 5. TRANSCRIBE NEW AUDIO ONLY
             try:
-                # Optimization: Only transcribe if we have new data compared to last loop?
-                # But raw_buffer is mutable and we made a copy.
-                # We can check len(raw_buffer). 
+                # Get ONLY the new audio since last transcription
+                new_audio = raw_buffer[last_transcription_pos:]
                 
-                # Perform transcription in-memory
-                current_text = analyze_audio_buffer(bytes(raw_buffer))
+                if len(new_audio) >= MIN_AUDIO_FOR_TRANSCRIPTION or force_transcribe:
+                    # Transcribe just the new part
+                    new_text = analyze_audio_buffer(bytes(new_audio))
+                    
+                    if new_text:
+                        # Append to accumulated text
+                        if accumulated_text and not accumulated_text.endswith(' '):
+                            accumulated_text += " "
+                        accumulated_text += new_text
+                    
+                    # Update tracking
+                    last_transcription_pos = current_len
+                    last_transcription_time = time.time()
+                    
+                    # Emit if text changed
+                    if accumulated_text and accumulated_text != last_emitted_text:
+                        socketio.emit("transcript", {"partial": accumulated_text}, room=sid)
+                        last_emitted_text = accumulated_text
                 
-                # If we have a significant text change, emit it
-                if current_text:
-                    # Combine committed text + current buffer window text
-                    full_text = f"{committed_text} {current_text}".strip()
-                    
-                    # Logic to commit text:
-                    # If buffer is full, we move some text to committed and trim buffer?
-                    # That's hard to sync with audio bytes.
-                    # Current safe optimization: Just limit the buffer to 45s (prevent crash) 
-                    # and rely on the user pausing/clearing if they talk for hours.
-                    # Or we simply don't trim, but rely on VAD and optimized whisper to be fast enough?
-                    # No, infinite audio = infinite processing time. 
-                    
-                    # AUTO-TRIM LOGIC:
-                    # If buffer > MAX_BYTES, we MUST trim.
-                    if len(raw_buffer) > MAX_BUFFER_BYTES:
-                        excess = len(raw_buffer) - MAX_BUFFER_BYTES
-                        with LOCK:
-                            if sid in clients:
-                                # Trim from the start
-                                del clients[sid]["raw_buffer"][:excess]
-                                # We roughly assume the text for that audio is stable.
-                                # But we can't easily extract "text corresponding to deleted 5 seconds".
-                                # So for now, we just accept that the "partial" might jump if we stream for >30s.
-                                # Better UX: Don't show infinite history in one "partial" event.
-                        
-                    if full_text != last_buffer_text:
-                        socketio.emit("transcript", {"partial": full_text}, room=sid)
-                        last_buffer_text = full_text
-
             except Exception as e:
                 logging.exception("Error during transcription step")
 
-            # 5. CLEANUP / SLEEP
+            # 6. FINAL STOP CHECK
             if stop_flag:
+                # One final transcription of any remaining audio
+                remaining_audio = raw_buffer[last_transcription_pos:]
+                if remaining_audio:
+                    try:
+                        final_text = analyze_audio_buffer(bytes(remaining_audio))
+                        if final_text:
+                            if accumulated_text and not accumulated_text.endswith(' '):
+                                accumulated_text += " "
+                            accumulated_text += final_text
+                            if accumulated_text != last_emitted_text:
+                                socketio.emit("transcript", {"partial": accumulated_text}, room=sid)
+                    except:
+                        pass
+                
                 with LOCK:
                     if sid in clients:
                         clients[sid]["raw_buffer"] = bytearray()
                 break
 
-            # Reduced sleep from 1.0 to 0.2 for faster updates
-            time.sleep(0.2) 
+            # Dynamic sleep based on activity
+            if current_len > 0:
+                time.sleep(0.15)
+            else:
+                time.sleep(0.5)
             
-    except Exception:
-        logging.exception("transcription loop error")
+    except Exception as e:
+        logging.exception(f"transcription loop error for {sid}: {e}")
+    finally:
+        logging.info(f"Transcription thread ended for {sid}")

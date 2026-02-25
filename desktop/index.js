@@ -187,10 +187,7 @@ ipcMain.on('toggle-invisibility', (event, enabled) => {
       visibleOnFullScreen: true,
       skipTransformProcessType: true
     });
-    if (process.platform === 'win32') {
-      win.setOpacity(0.999);
-    }
-
+    win.setOpacity(0.999);
   } else {
     console.log('Invisibility mode DISABLED');
     win.setContentProtection(false);
@@ -203,20 +200,13 @@ ipcMain.on('toggle-taskbar', (event, hidden) => {
   if (hidden) {
     console.log('Hiding app from taskbar');
     win.setSkipTaskbar(true);
-
-    if (process.platform === 'win32') {
-      win.setAlwaysOnTop(true, 'screen-saver');
-      win.setVisibleOnAllWorkspaces(true);
-    }
-
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.setVisibleOnAllWorkspaces(true);
   } else {
     console.log('Showing app in taskbar');
     win.setSkipTaskbar(false);
-
-    if (process.platform === 'win32') {
-      win.setAlwaysOnTop(true, 'normal');
-      win.setVisibleOnAllWorkspaces(false);
-    }
+    win.setAlwaysOnTop(true, 'normal');
+    win.setVisibleOnAllWorkspaces(false);
   }
 });
 
@@ -285,11 +275,7 @@ ipcMain.on('audio-pause', () => {
   if (ffmpegProcess && !isAudioPaused) {
     isAudioPaused = true;
 
-    if (process.platform !== 'win32') {
-      ffmpegProcess.kill('SIGSTOP');
-    } else {
-      console.log('Audio paused (Windows)');
-    }
+    console.log('Audio paused');
 
     if (socket && socket.connected) {
       socket.emit("pause_stream");
@@ -303,11 +289,7 @@ ipcMain.on('audio-resume', () => {
   if (ffmpegProcess && isAudioPaused) {
     isAudioPaused = false;
 
-    if (process.platform !== 'win32') {
-      ffmpegProcess.kill('SIGCONT');
-    } else {
-      console.log('Audio resumed (Windows)');
-    }
+    console.log('Audio resumed')
 
     if (socket && socket.connected) {
       socket.emit("resume_stream");
@@ -690,10 +672,8 @@ ipcMain.on('capture-screenshot', async (event) => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    unregisterGlobalShortcuts();
-    app.quit();
-  }
+  unregisterGlobalShortcuts();
+  app.quit();
 });
 
 app.on("before-quit", () => {
