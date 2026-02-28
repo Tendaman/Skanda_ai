@@ -49,7 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <header className="shrink-0 px-4 pt-4 pb-2">
             <div className="flex justify-between items-center">
               
-              <span className="ml-1 text-2xl font-bold text-blue-300">Skanda AI</span>
+              <span className="ml-1 cursor-default text-2xl font-bold text-blue-300">Skanda AI</span>
               
               <div className="absolute left-1/2 transform -translate-x-1/2">
                 <MoveIcon className="drag-area w-8 h-8 p-1 bg-gray-300 rounded-2xl" />

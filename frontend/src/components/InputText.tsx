@@ -383,7 +383,7 @@ export default function InputText({
             }
           }}
           style={{
-            cursor: isTextareaDisabled ? 'default' : 'text'
+            cursor: isTextareaDisabled ? 'default' : 'default'
           }}
         />
 

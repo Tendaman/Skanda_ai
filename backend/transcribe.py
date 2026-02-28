@@ -94,6 +94,8 @@ def analyze_audio_buffer(raw_bytes):
         logging.exception(f"Error in analyze_audio_buffer: {e}")
         return ""
 
+# backend\transcribe.py (updated section with reset flag handling)
+
 def transcribe_loop(sid, clients, LOCK, socketio):
     logging.info(f"Transcription thread started for {sid}")
     
@@ -120,10 +122,32 @@ def transcribe_loop(sid, clients, LOCK, socketio):
                 state = clients[sid]
                 stop_flag = state.get("stopped", False)
                 paused_flag = state.get("paused", False)
+                reset_flag = state.get("reset_flag", False)
                 
-                # Get the full buffer - NO TRIMMING!
+                # Get the full buffer
                 raw_buffer = state.get("raw_buffer", bytearray())
                 current_len = len(raw_buffer)
+                
+                # Check if reset flag is set (delete button was pressed)
+                if reset_flag:
+                    logging.info(f"Reset flag detected for {sid}, resetting transcription state")
+                    # Reset all local state
+                    accumulated_text = ""
+                    last_emitted_text = ""
+                    last_transcription_pos = 0
+                    # Clear the reset flag
+                    state["reset_flag"] = False
+                    
+                    # Also emit empty transcript to clear UI
+                    socketio.emit("transcript", {"partial": ""}, room=sid)
+                    
+                # Check if buffer was cleared without reset flag (fallback detection)
+                elif current_len < last_transcription_pos:
+                    logging.info(f"Buffer size decreased for {sid} without reset flag, resetting state")
+                    accumulated_text = ""
+                    last_emitted_text = ""
+                    last_transcription_pos = 0
+                    socketio.emit("transcript", {"partial": ""}, room=sid)
 
             # 2. HANDLE CONTROL FLAGS
             if paused_flag:

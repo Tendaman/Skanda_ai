@@ -1,3 +1,4 @@
+# server.py
 import os
 import logging
 import threading
@@ -51,7 +52,8 @@ def on_connect():
             "raw_buffer": bytearray(),
             "stopped": False,
             "paused": False,
-            "thread": None
+            "thread": None,
+            "reset_flag": False  # Add reset flag to signal transcription thread
         }
 
 
@@ -63,6 +65,7 @@ def on_start_stream(data):
         clients[sid]["raw_buffer"] = bytearray()
         clients[sid]["stopped"] = False
         clients[sid]["paused"] = False
+        clients[sid]["reset_flag"] = False  # Reset the flag
 
     if clients[sid].get("thread") is None or not clients[sid]["thread"].is_alive():
         t = threading.Thread(target=transcribe_loop, args=(
@@ -99,8 +102,12 @@ def on_clear_stream():
     logging.info(f"clear_stream from {sid}")
     with LOCK:
         if sid in clients:
+            # Clear the raw buffer
             clients[sid]["raw_buffer"] = bytearray()
             clients[sid]["paused"] = False
+            # Set a flag to tell transcription thread to reset its state
+            clients[sid]["reset_flag"] = True
+            logging.info(f"Reset flag set for {sid}")
 
 
 @socketio.on("audio_chunk")
