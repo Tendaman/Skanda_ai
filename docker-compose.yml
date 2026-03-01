@@ -12,6 +12,7 @@ services:
       - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL}
       - AI_MODEL=${AI_MODEL}
       - VISION_MODEL=${VISION_MODEL}
+      - HF_TOKEN=${HF_TOKEN}
     volumes:
       # Mount source for development (optional)
       # - ./backend:/app
